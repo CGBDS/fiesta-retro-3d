@@ -139,7 +139,10 @@ function fadeTo(name, dur = 0.25) {
 
 fbxLoader.load('pedro-frogleo.fbx', (fbx) => {
   const boneNames = [];
-  fbx.traverse(o => { if (o.isBone) boneNames.push(o.name); });
+  fbx.traverse(o => {
+    if (o.isBone) boneNames.push(o.name);
+    if (o.isMesh && !o.geometry.getAttribute('normal')) o.geometry.computeVertexNormals(); // el FBX no trae normales
+  });
   const cmap = canonOf(boneNames);
 
   // normaliza tamaño a ~1.9 de alto y pone los pies en y=0
