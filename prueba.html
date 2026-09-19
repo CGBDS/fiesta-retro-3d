@@ -15,13 +15,11 @@
             align-items:center; justify-content:center; font-size:17px; transition:opacity .5s; }
   #err { position:fixed; inset:0; z-index:60; display:none; align-items:center; justify-content:center;
          background:#14141c; color:#ff8080; padding:30px; text-align:center; font-size:16px; }
-  /* joystick flotante */
   #joy-zone { position:fixed; left:0; top:0; width:55%; height:100%; z-index:20; touch-action:none; }
   #joy-base { position:fixed; width:124px; height:124px; border-radius:50%; z-index:21; display:none;
               background:rgba(255,255,255,.14); border:2px solid rgba(255,255,255,.45); pointer-events:none; }
   #joy-knob { position:absolute; left:50%; top:50%; width:56px; height:56px; border-radius:50%;
               background:rgba(255,255,255,.75); transform:translate(-50%,-50%); }
-  /* botón de salto */
   #btn-jump { position:fixed; z-index:20; right:26px; bottom:calc(34px + env(safe-area-inset-bottom));
               width:92px; height:92px; border-radius:50%; border:3px solid rgba(255,255,255,.6);
               background:rgba(165,114,255,.55); color:#fff; font-size:15px; font-weight:700;
@@ -37,7 +35,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hud">🕹️ Prueba de movimiento<small>Izquierda: joystick · Derecha: saltar · PC: WASD + espacio</small></div>
+<div id="hud">🕹️ Prueba de movimiento<small>Joystick: mover (al fondo: correr) · Botón: saltar · PC: WASD + espacio</small></div>
 <div id="loader">Cargando a Pedro…</div>
 <div id="err"></div>
 <div id="joy-zone"></div>
@@ -46,9 +44,9 @@
 
 <script type="module">
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
-/* ---------- escena básica ---------- */
+/* ---------- escena ---------- */
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -63,8 +61,8 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.position.set(12, 20, 8);
 scene.add(sun);
 
-/* ---------- espacio sencillo: piso + muros + cajas ---------- */
-const ARENA = 17; // medio lado
+/* ---------- espacio sencillo ---------- */
+const ARENA = 17;
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(ARENA*2+8, ARENA*2+8),
   new THREE.MeshLambertMaterial({ color:0x6fae6f })
@@ -77,7 +75,7 @@ scene.add(grid);
 
 const wallMat = new THREE.MeshLambertMaterial({ color:0x8a7f72 });
 const crateMat = new THREE.MeshLambertMaterial({ color:0xb0894a });
-const solids = []; // AABBs {minX,maxX,minZ,maxZ}
+const solids = [];
 function addBox(x, z, w, h, d, mat) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, h/2, z);
@@ -94,100 +92,88 @@ addBox(5, 3, 2.2, 2.2, 2.2, crateMat);
 addBox(-3, 8, 3.2, 1.4, 1.4, crateMat);
 addBox(8, -8, 1.6, 3.0, 1.6, crateMat);
 
-/* ---------- Pedro: carga + motor de poses (del juego Fiesta Retro) ---------- */
-const D2R = Math.PI/180;
-const H='mixamorigHips', SP='mixamorigSpine', SP1='mixamorigSpine1', SP2='mixamorigSpine2',
-      NE='mixamorigNeck', HE='mixamorigHead',
-      LA='mixamorigLeftArm', LF='mixamorigLeftForeArm',
-      RA='mixamorigRightArm', RF='mixamorigRightForeArm',
-      LUL='mixamorigLeftUpLeg', LL='mixamorigLeftLeg',
-      RUL='mixamorigRightUpLeg', RL='mixamorigRightLeg';
-const bones = {}, boneList = [], restWorldQ = {};
-const restP = new THREE.Vector3();
-let hips = null, ready = false;
-
-const player = new THREE.Group();
+/* ---------- Pedro: modelo + animaciones reales de Mixamo ---------- */
+const player = new THREE.Group();   // física (posición)
 scene.add(player);
+const charGroup = new THREE.Group(); // escala + ajuste vertical
+player.add(charGroup);
 
-const _e = new THREE.Euler(), _q = new THREE.Quaternion(), _qy = new THREE.Quaternion(), _qi = new THREE.Quaternion();
-function lerpPose(a, b, k) {
-  const out = { pose:{}, root:[0,0,0], rootRy:0 };
-  const names = new Set([...Object.keys(a.pose), ...Object.keys(b.pose)]);
-  for (const n of names) {
-    const pa = a.pose[n]||[0,0,0], pb = b.pose[n]||[0,0,0];
-    out.pose[n] = [pa[0]+(pb[0]-pa[0])*k, pa[1]+(pb[1]-pa[1])*k, pa[2]+(pb[2]-pa[2])*k];
+let mixer = null, actions = {}, activeName = null, ready = false;
+const JUMP_V = 7.2, GRAV = 22;
+
+const fbxLoader = new FBXLoader();
+const canonOf = names => { const m = {}; for (const n of names) m[n.replace(/:/g,'').toLowerCase()] = n; return m; };
+function normalizeClip(clip, cmap) {
+  for (const tr of clip.tracks) {
+    const d = tr.name.lastIndexOf('.');
+    if (d < 0) continue;
+    const node = tr.name.slice(0, d), prop = tr.name.slice(d+1);
+    const hit = cmap[node.replace(/:/g,'').toLowerCase()];
+    if (hit && hit !== node) tr.name = hit + '.' + prop;
   }
-  for (let i=0;i<3;i++) out.root[i] = a.root[i]+(b.root[i]-a.root[i])*k;
-  out.rootRy = a.rootRy+(b.rootRy-a.rootRy)*k;
-  return out;
+  return clip;
 }
-function applyPose(p) {
-  const posedW = {};
-  for (const n of boneList) {
-    const an = p.pose[n]||[0,0,0];
-    _e.set(an[0]*D2R, an[1]*D2R, an[2]*D2R, 'XYZ');
-    _q.setFromEuler(_e);
-    _q.multiply(restWorldQ[n]);
-    const par = bones[n].parent;
-    if (par && par.isBone) {
-      const qW = _q.clone();
-      _q.premultiply(_qi.copy(posedW[par.name]).invert());
-      posedW[n] = qW;
-    } else {
-      _qy.setFromEuler(new THREE.Euler(0, p.rootRy*D2R, 0));
-      _q.premultiply(_qy);
-      posedW[n] = _q.clone();
+function stripRootXZ(clip) { // caminar/correr en el sitio (sin desplazamiento de raíz)
+  for (const tr of clip.tracks) {
+    if (/hips\.position$/i.test(tr.name)) {
+      const v = tr.values;
+      for (let i = 0; i < v.length; i += 3) { v[i] = 0; v[i+2] = 0; }
     }
-    bones[n].quaternion.copy(_q);
-    if (n===H) bones[n].position.set(restP.x+p.root[0], restP.y+p.root[1], restP.z+p.root[2]);
   }
 }
-
-function idlePose(t) {
-  const b = Math.sin(t*2.2);
-  return { pose:{ [SP1]:[1.5+b,0,0], [LA]:[0,0,-(5-b*1.2)], [RA]:[0,0,5-b*1.2],
-    [LF]:[0,6,0], [RF]:[0,-6,0], [HE]:[0,Math.sin(t*0.7)*5,0], [SP2]:[1,0,0] },
-    root:[0, 0.01+b*0.008, 0], rootRy:0 };
-}
-function walkPose(ph) {
-  const s = Math.sin(ph);
-  return { pose:{
-    [LUL]:[s*30,0,0], [RUL]:[-s*30,0,0],
-    [LL]:[6+30*Math.max(0,Math.sin(ph+2.4)),0,0],
-    [RL]:[6+30*Math.max(0,Math.sin(ph+Math.PI+2.4)),0,0],
-    [LA]:[-s*22,0,-8], [RA]:[s*22,0,8],
-    [LF]:[0,10,0], [RF]:[0,-10,0],
-    [SP1]:[6,0,0], [SP2]:[2,0,0], [HE]:[0,0,0] },
-    root:[0, Math.abs(Math.cos(ph))*0.045, 0], rootRy:0 };
-}
-function jumpPose(t) {
-  const w = Math.sin(t*14)*4;
-  return { pose:{
-    [LUL]:[-32,0,0], [LL]:[58,0,0], [RUL]:[-16,0,0], [RL]:[42,0,0],
-    [LA]:[0,0,-72+w], [RA]:[0,0,72-w], [LF]:[0,26,0], [RF]:[0,-26,0],
-    [SP1]:[-7,0,0], [HE]:[-6,0,0] },
-    root:[0,0,0], rootRy:0 };
+function fadeTo(name, dur = 0.25) {
+  const next = actions[name];
+  if (!next || name === activeName) return;
+  const prev = actions[activeName];
+  activeName = name;
+  next.reset().setEffectiveTimeScale(1).setEffectiveWeight(1);
+  if (name === 'jump') {
+    next.setLoop(THREE.LoopOnce, 1);
+    next.setEffectiveTimeScale(next.getClip().duration / (2*JUMP_V/GRAV)); // sincroniza con el salto físico
+  } else {
+    next.setLoop(THREE.LoopRepeat, Infinity);
+  }
+  if (prev && prev !== next) prev.fadeOut(dur);
+  next.fadeIn(dur).play();
 }
 
-new GLTFLoader().load('pedro-rigged.glb', (gltf) => {
-  const model = gltf.scene;
-  model.updateMatrixWorld(true);
-  const _pv = new THREE.Vector3(), _sv = new THREE.Vector3();
-  model.traverse(o => {
-    if (o.isBone) {
-      bones[o.name] = o; boneList.push(o.name);
-      const q = new THREE.Quaternion();
-      o.matrixWorld.decompose(_pv, q, _sv);
-      restWorldQ[o.name] = q;
-    }
-  });
-  hips = bones[H];
-  restP.copy(hips.position);
-  model.position.y = 1.0; // los pies del modelo quedan en y≈-1: se sube para que pisen el suelo
-  player.add(model);
-  ready = true;
-  const l = document.getElementById('loader');
-  l.style.opacity = '0'; setTimeout(()=>l.remove(), 600);
+fbxLoader.load('pedro-frogleo.fbx', (fbx) => {
+  const boneNames = [];
+  fbx.traverse(o => { if (o.isBone) boneNames.push(o.name); });
+  const cmap = canonOf(boneNames);
+
+  // normaliza tamaño a ~1.9 de alto y pone los pies en y=0
+  const box = new THREE.Box3().setFromObject(fbx);
+  const size = box.getSize(new THREE.Vector3());
+  const s = 1.9 / size.y;
+  charGroup.scale.setScalar(s);
+  charGroup.add(fbx);
+  charGroup.updateMatrixWorld(true);
+  const box2 = new THREE.Box3().setFromObject(charGroup);
+  fbx.position.y -= box2.min.y / s;
+
+  mixer = new THREE.AnimationMixer(fbx);
+  const files = { idle:'anims/idle.fbx', walk:'anims/walk.fbx', run:'anims/run.fbx', jump:'anims/jump.fbx' };
+  let pending = Object.keys(files).length;
+  const done = () => {
+    if (--pending > 0) return;
+    if (actions.idle) { actions.idle.play(); activeName = 'idle'; }
+    ready = true;
+    const l = document.getElementById('loader');
+    l.style.opacity = '0'; setTimeout(() => l.remove(), 600);
+  };
+  for (const [name, url] of Object.entries(files)) {
+    fbxLoader.load(url, (g) => {
+      if (g.animations.length) {
+        const clip = normalizeClip(g.animations[0], cmap);
+        if (name === 'walk' || name === 'run') stripRootXZ(clip);
+        const a = mixer.clipAction(clip);
+        a.clampWhenFinished = true;
+        actions[name] = a;
+      }
+      done();
+    }, undefined, () => done());
+  }
 }, undefined, () => {
   const el = document.getElementById('err');
   el.style.display = 'flex';
@@ -235,8 +221,8 @@ document.getElementById('btn-jump').addEventListener('pointerdown', (e) => {
 });
 
 /* ---------- movimiento ---------- */
-const SPEED = 3.6, RADIUS = 0.45;
-let yaw = 0, vy = 0, grounded = true, walkPh = 0, tG = 0, airK = 0;
+const SPEED_MAX = 6.2, RADIUS = 0.45;
+let yaw = 0, vy = 0, grounded = true;
 const camPos = new THREE.Vector3(0, 2.8, 5.4);
 
 function collide(px, pz) {
@@ -272,9 +258,7 @@ const clock = new THREE.Clock();
 function tick() {
   requestAnimationFrame(tick);
   const dt = Math.min(clock.getDelta(), 0.05);
-  tG += dt;
 
-  // entrada
   let ix = joy.x, iz = joy.y;
   if (keys.KeyW || keys.ArrowUp) iz -= 1;
   if (keys.KeyS || keys.ArrowDown) iz += 1;
@@ -283,7 +267,7 @@ function tick() {
   const il = Math.hypot(ix, iz);
   if (il > 1) { ix/=il; iz/=il; }
 
-  const sp = Math.min(1, il) * SPEED;
+  const sp = Math.min(1, il) * SPEED_MAX;
   if (il > 0.12) {
     const targetYaw = Math.atan2(ix, iz);
     yaw = angLerp(yaw, targetYaw, Math.min(1, dt*10));
@@ -294,26 +278,17 @@ function tick() {
   }
   player.rotation.y = yaw;
 
-  // salto / gravedad
-  if ((wantJump || keys.Space) && grounded) { vy = 7.2; grounded = false; }
+  if ((wantJump || keys.Space) && grounded) { vy = JUMP_V; grounded = false; }
   wantJump = false; keys.Space = false;
   if (!grounded) {
-    vy -= 22*dt;
+    vy -= GRAV*dt;
     player.position.y += vy*dt;
     if (player.position.y <= 0) { player.position.y = 0; vy = 0; grounded = true; }
   }
-  airK += ((grounded?0:1) - airK) * Math.min(1, dt*10);
 
-  // animación: idle <-> caminar, + salto
-  walkPh += dt * (2 + sp*2.8);
-  if (ready) {
-    const k = Math.min(1, sp/SPEED);
-    let pose = lerpPose(idlePose(tG), walkPose(walkPh), k);
-    if (airK > 0.01) pose = lerpPose(pose, jumpPose(tG), airK);
-    applyPose(pose);
-  }
+  if (ready) fadeTo(!grounded ? 'jump' : sp > 4.4 ? 'run' : sp > 0.4 ? 'walk' : 'idle');
+  if (mixer) mixer.update(dt);
 
-  // cámara seguidora fija
   const tx = player.position.x, tz = player.position.z + 5.4, ty = 2.8;
   camPos.x += (tx-camPos.x)*Math.min(1, dt*5);
   camPos.y += (ty-camPos.y)*Math.min(1, dt*5);
