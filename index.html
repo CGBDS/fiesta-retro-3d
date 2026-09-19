@@ -224,10 +224,17 @@ const MOVES = {
 const LANE_MOVE = ['dance1', 'dance2', 'dance3', 'wave'];
 const LANE_EMOJI = ['💃', '🕺', '🎉', '👋'];
 
-/* ============ música (WebAudio, 120 BPM sincronizada al juego) ============ */
+/* ============ música de TERROR (WebAudio, 120 BPM sincronizada al juego) ============ */
 const Music = {
-  ctx: null, master: null, on: true, timer: null, step: 0, next: 0,
+  ctx: null, master: null, grit: null, echo: null, wind: null,
+  on: true, timer: null, step: 0, next: 0,
   BPM: 120,
+  // Re menor tétrico: D2, D2, Bb1, C2
+  roots: [73.42, 73.42, 58.27, 65.41],
+  // Campanadas fantasmales dispersas (64 pasos): tritono y 2da menor por doquier
+  melody: {0:880, 4:830.61, 8:698.46, 12:659.26, 16:622.25, 20:587.33, 24:554.37,
+           28:523.25, 32:1174.66, 36:1108.73, 40:1046.5, 44:987.77,
+           48:880, 52:830.61, 56:739.99, 60:698.46},
   ensure() {
     if (this.ctx || this.failed) return;
     const C = window.AudioContext || window.webkitAudioContext;
@@ -237,49 +244,130 @@ const Music = {
       this.master = this.ctx.createGain();
       this.master.gain.value = this.on ? 1 : 0;
       this.master.connect(this.ctx.destination);
+      // --- distorsión: curva agresiva ---
+      this.grit = this.ctx.createWaveShaper();
+      const n = 1024, curve = new Float32Array(n), k = 80;
+      for (let i = 0; i < n; i++) {
+        const x = (i / (n - 1)) * 2 - 1;
+        curve[i] = ((1 + k) * x) / (1 + k * Math.abs(x));
+      }
+      this.grit.curve = curve;
+      this.grit.connect(this.master);
+      // --- eco fantasmal (corchea con puntillo) ---
+      this.echo = this.ctx.createDelay(1);
+      this.echo.delayTime.value = 0.375;
+      const fb = this.ctx.createGain(); fb.gain.value = 0.38;
+      const wet = this.ctx.createGain(); wet.gain.value = 0.5;
+      this.echo.connect(fb); fb.connect(this.echo);
+      this.echo.connect(wet); wet.connect(this.master);
     } catch (e) { this.failed = true; this.ctx = null; }
-    this.bass = [130.8, 98.0, 110.0, 87.3];
-    this.lead = [523,587,659,784, 880,784,659,587, 523,587,659,587, 440,0,523,0];
   },
   start(atTime, stepOffset) {
     this.ensure();
     if (!this.ctx || this.timer) return;
     this.next = atTime;
     this.step = stepOffset || 0;
+    this.windStart(atTime);
     this.timer = setInterval(() => this.schedule(), 90);
   },
   stop() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    this.windStop();
   },
   schedule() {
     if (!this.ctx) return;
     const sixteenth = 60 / this.BPM / 4;   // 0.125s
     while (this.next < this.ctx.currentTime + 0.35) {
       const s = this.step % 16, bar = Math.floor(this.step / 16) % 4;
-      this.note(this.bass[bar], this.next, sixteenth * 3.5, 'triangle', 0.16);
-      const f = this.lead[s];
-      if (f) this.note(f, this.next, sixteenth * 1.8, 'square', 0.05);
-      if (s % 4 === 0) this.tick(this.next);            // marca cada beat del juego
-      if (s % 4 === 2) this.note(this.bass[bar] * 2, this.next, sixteenth, 'sine', 0.08);
+      if (s === 0) {                       // drone grave por compás
+        this.drone(this.roots[bar], this.next, sixteenth * 16);
+        this.cluster(this.roots[bar], this.next, sixteenth * 8);
+      }
+      const f = this.melody[this.step % 64];   // campanada fantasmal
+      if (f) this.bell(f, this.next, sixteenth * 8);
+      if (s % 4 === 0) this.thud(this.next);   // latido = marca del beat
+      if ((bar === 2 || bar === 3) && s === 8) this.stab(this.next);
       this.next += sixteenth; this.step++;
     }
   },
-  note(freq, t, dur, type, vol) {
-    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
-    o.type = type; o.frequency.value = freq;
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(vol, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    o.connect(g); g.connect(this.master);
-    o.start(t); o.stop(t + dur + 0.05);
+  env(g, t, peak, dur, atk) {
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(peak, t + (atk || 0.02));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   },
-  tick(t) {
+  drone(freq, t, dur) {   // dos sierras desafinadas = zumbido infernal
+    [-9, 7].forEach(cents => {
+      const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+      o.type = 'sawtooth'; o.frequency.value = freq; o.detune.value = cents;
+      this.env(g, t, 0.055, dur, dur * 0.3);
+      o.connect(g); g.connect(this.grit);
+      o.start(t); o.stop(t + dur + 0.05);
+    });
+  },
+  cluster(freq, t, dur) { // segunda menor frotando contra la raíz
+    [freq, freq * 1.0595].forEach(fr => {
+      const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+      o.type = 'sawtooth'; o.frequency.value = fr;
+      this.env(g, t, 0.035, dur, 0.05);
+      o.connect(g); g.connect(this.grit);
+      o.start(t); o.stop(t + dur + 0.05);
+    });
+  },
+  bell(freq, t, dur) {    // campana desafinada con eco
+    [['sine', 0], ['triangle', 5]].forEach(([type, det]) => {
+      const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+      o.type = type; o.frequency.value = freq; o.detune.value = det;
+      this.env(g, t, 0.06, dur, 0.01);
+      o.connect(g); g.connect(this.grit); g.connect(this.echo);
+      o.start(t); o.stop(t + dur + 0.05);
+    });
+  },
+  thud(t) {               // latido grave que marca cada beat
     const o = this.ctx.createOscillator(), g = this.ctx.createGain();
-    o.type = 'square'; o.frequency.value = 1200;
-    g.gain.setValueAtTime(0.06, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+    o.type = 'sine';
+    o.frequency.setValueAtTime(65, t);
+    o.frequency.exponentialRampToValueAtTime(32, t + 0.16);
+    this.env(g, t, 0.5, 0.22, 0.005);
     o.connect(g); g.connect(this.master);
-    o.start(t); o.stop(t + 0.06);
+    o.start(t); o.stop(t + 0.3);
+  },
+  stab(t) {               // golpe disonante: tritono distorsionado
+    [110, 110 * 1.4142].forEach(fr => {
+      const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+      o.type = 'square'; o.frequency.value = fr;
+      this.env(g, t, 0.05, 0.4, 0.01);
+      o.connect(g); g.connect(this.grit);
+      o.start(t); o.stop(t + 0.5);
+    });
+  },
+  windStart(t) {          // viento ambiental: ruido filtrado
+    const len = 2 * this.ctx.sampleRate;
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf; src.loop = true;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 320;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.02, t + 2);
+    const lfo = this.ctx.createOscillator(), lg = this.ctx.createGain();
+    lfo.frequency.value = 0.13; lg.gain.value = 0.008;
+    lfo.connect(lg); lg.connect(g.gain);
+    src.connect(lp); lp.connect(g); g.connect(this.master);
+    src.start(t); lfo.start(t);
+    this.wind = { src, lfo, g };
+  },
+  windStop() {
+    if (!this.wind || !this.ctx) return;
+    const t = this.ctx.currentTime, w = this.wind;
+    this.wind = null;
+    try {
+      w.g.gain.cancelScheduledValues(t);
+      w.g.gain.linearRampToValueAtTime(0.0001, t + 0.8);
+      w.src.stop(t + 1); w.lfo.stop(t + 1);
+    } catch (e) {}
   },
   toggle() { this.on = !this.on; if (this.master) this.master.gain.value = this.on ? 1 : 0; return this.on; }
 };
