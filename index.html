@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Fiesta Retro 🕺 · ¡Feliz Cumpleaños!</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#000;
+    font-family:-apple-system,'Segoe UI',Roboto,sans-serif; user-select:none; -webkit-user-select:none; }
+  #scene { position:fixed; inset:0; touch-action:none; }
+  #scene canvas { display:block; }
+
+  /* ---- autopista de notas ---- */
+  #highway { position:fixed; top:64px; left:0; right:0; bottom:158px; display:flex; z-index:4; }
+  .lane { flex:1; position:relative; border-left:1px solid rgba(255,255,255,.07); touch-action:none; cursor:pointer; }
+  .lane:first-child { border-left:none; }
+  .lane.flash-good { background:rgba(255,255,255,.10); }
+  .lane.flash-perfect { background:rgba(165,114,255,.22); }
+  .lane.flash-miss { background:rgba(255,60,60,.16); }
+  .note { position:absolute; top:0; left:50%; width:54px; height:54px; margin-left:-27px; border-radius:16px;
+    display:flex; align-items:center; justify-content:center; font-size:28px;
+    box-shadow:0 0 14px rgba(0,0,0,.6), inset 0 0 0 2px rgba(255,255,255,.35);
+    will-change:transform; }
+  .note.l0 { background:linear-gradient(145deg,#A572FF,#6d3fd4); }
+  .note.l1 { background:linear-gradient(145deg,#4de3ff,#1d86c9); }
+  .note.l2 { background:linear-gradient(145deg,#ffd166,#e09b1f); }
+  .note.l3 { background:linear-gradient(145deg,#ff7ab8,#d63d7f); }
+  .note.hit { transition:transform .15s, opacity .15s; transform:scale(1.6)!important; opacity:0; }
+
+  #hitline { position:fixed; left:8px; right:8px; height:3px; z-index:5; pointer-events:none;
+    background:linear-gradient(90deg,transparent,#fff,transparent); opacity:.7;
+    box-shadow:0 0 12px #A572FF; }
+
+  /* ---- HUD ---- */
+  #hud { position:fixed; top:max(10px,env(safe-area-inset-top)); left:0; right:0; z-index:10;
+    display:flex; justify-content:space-between; align-items:center; padding:0 14px; pointer-events:none;
+    color:#fff; text-shadow:0 2px 8px rgba(0,0,0,.8); }
+  #score { font-size:22px; font-weight:800; }
+  #score small { display:block; font-size:10px; font-weight:600; color:#cbb8ff; letter-spacing:2px; }
+  #timebar { width:34%; height:10px; background:rgba(255,255,255,.15); border-radius:6px; overflow:hidden; }
+  #timefill { height:100%; width:100%; background:linear-gradient(90deg,#A572FF,#4de3ff); border-radius:6px; }
+  #combo { font-size:22px; font-weight:800; text-align:right; min-width:70px; }
+  #combo small { display:block; font-size:10px; font-weight:600; color:#ffd166; letter-spacing:2px; }
+  #combo.fever { color:#ffd166; animation:fev .5s infinite alternate; }
+  @keyframes fev { from{transform:scale(1);} to{transform:scale(1.18);} }
+
+  /* ---- pads ---- */
+  #pads { position:fixed; left:0; right:0; bottom:0; z-index:10; display:flex; gap:8px;
+    padding:10px 10px max(16px,env(safe-area-inset-bottom));
+    background:linear-gradient(to top, rgba(0,0,0,.8), rgba(0,0,0,0)); }
+  .pad { flex:1; border:1px solid rgba(255,255,255,.18); border-radius:18px; padding:12px 4px;
+    background:rgba(255,255,255,.08); color:#fff; font-size:13px; font-weight:700; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; gap:2px; touch-action:none;
+    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); transition:transform .08s; }
+  .pad .em { font-size:30px; line-height:1; }
+  .pad kbd { font-size:10px; opacity:.5; font-family:inherit; }
+  .pad:active, .pad.down { transform:scale(.9); }
+  .pad.p0.active { background:#A572FF; } .pad.p1.active { background:#1d86c9; }
+  .pad.p2.active { background:#e09b1f; } .pad.p3.active { background:#d63d7f; }
+  @media (pointer:coarse) { .pad kbd { display:none; } }
+
+  /* ---- botones flotantes ---- */
+  #topbtns { position:fixed; top:max(54px,env(safe-area-inset-top)); right:10px; z-index:11; display:flex; gap:8px; }
+  .tbtn { width:42px; height:42px; border-radius:50%; border:1px solid rgba(255,255,255,.2);
+    background:rgba(0,0,0,.5); color:#fff; font-size:19px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; }
+  .tbtn.off { opacity:.45; }
+
+  /* ---- filtro CRT por encima de todo ---- */
+  #crt { position:fixed; inset:0; z-index:40; pointer-events:none; opacity:1; transition:opacity .3s;
+    background:repeating-linear-gradient(to bottom, rgba(0,0,0,.22) 0 1px, transparent 1px 3px); }
+  #crt.off { opacity:0; }
+  #judge { position:fixed; left:0; right:0; bottom:170px; z-index:12; text-align:center; pointer-events:none;
+    font-size:30px; font-weight:900; color:#fff; text-shadow:0 0 14px #A572FF, 0 2px 4px #000;
+    opacity:0; transition:opacity .25s; letter-spacing:1px; }
+  #judge.show { opacity:1; }
+  #judge.perfect { color:#ffd166; } #judge.miss { color:#ff5b5b; text-shadow:0 0 14px #ff0000, 0 2px 4px #000; }
+
+  /* ---- overlays ---- */
+  .overlay { position:fixed; inset:0; z-index:50; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:14px; background:rgba(0,0,0,.72); color:#fff; text-align:center; padding:24px;
+    backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); }
+  .overlay h1 { font-size:34px; font-weight:900; text-shadow:0 0 18px rgba(165,114,255,.8); }
+  .overlay h1 .purp { color:#A572FF; }
+  .overlay p { font-size:15px; color:#d9ccff; max-width:340px; line-height:1.5; }
+  .bigbtn { font-size:20px; font-weight:800; padding:16px 46px; border:none; border-radius:20px; cursor:pointer;
+    background:#A572FF; color:#12081f; box-shadow:0 0 24px rgba(165,114,255,.6); }
+  .bigbtn:active { transform:scale(.94); }
+  .stats { display:flex; gap:22px; margin:6px 0; }
+  .stats div b { display:block; font-size:26px; }
+  .stats div span { font-size:11px; color:#cbb8ff; letter-spacing:1px; }
+  #newbest { display:none; color:#ffd166; font-weight:800; animation:fev .5s infinite alternate; }
+  .hidden { display:none !important; }
+
+  #loader { position:fixed; inset:0; background:#000; z-index:60; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:16px; color:#fff; transition:opacity .6s; }
+  .spin { width:46px; height:46px; border-radius:50%; border:4px solid rgba(165,114,255,.25);
+    border-top-color:#A572FF; animation:sp .9s linear infinite; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  #err { display:none; color:#ff8a8a; font-size:14px; max-width:80%; text-align:center; }
+</style>
+</head>
+<body>
+<div id="scene"></div>
+
+<div id="highway">
+  <div class="lane" data-lane="0"></div>
+  <div class="lane" data-lane="1"></div>
+  <div class="lane" data-lane="2"></div>
+  <div class="lane" data-lane="3"></div>
+</div>
+<div id="hitline"></div>
+
+<div id="hud">
+  <div id="score">0<small>PUNTOS</small></div>
+  <div id="timebar"><div id="timefill"></div></div>
+  <div id="combo">0<small>COMBO</small></div>
+</div>
+
+<div id="judge"></div>
+
+<div id="pads">
+  <button class="pad p0" data-lane="0"><span class="em">💃</span>Baile 1<kbd>D</kbd></button>
+  <button class="pad p1" data-lane="1"><span class="em">🕺</span>Baile 2<kbd>F</kbd></button>
+  <button class="pad p2" data-lane="2"><span class="em">🎉</span>Baile 3<kbd>J</kbd></button>
+  <button class="pad p3" data-lane="3"><span class="em">👋</span>Saludar<kbd>K</kbd></button>
+</div>
+
+<div id="topbtns">
+  <button class="tbtn" id="retroBtn" title="Filtro retro">📺</button>
+  <button class="tbtn" id="musicBtn" title="Música">🎵</button>
+</div>
+
+<div id="crt"></div>
+
+<div class="overlay" id="startOv">
+  <h1>FIESTA <span class="purp">RETRO</span> 🕺</h1>
+  <p>¡Feliz cumpleaños! Toca los pasos <b>cuando crucen la línea</b> al ritmo de la música. El muñeco baila lo que toques.</p>
+  <p>💃 Baile 1 &nbsp; 🕺 Baile 2 &nbsp; 🎉 Baile 3 &nbsp; 👋 Saludar</p>
+  <button class="bigbtn" id="playBtn">▶ JUGAR</button>
+</div>
+
+<div class="overlay hidden" id="endOv">
+  <h1>¡SE ACABÓ! 🎉</h1>
+  <div id="newbest">★ ¡NUEVO RÉCORD! ★</div>
+  <div class="stats">
+    <div><b id="fScore">0</b><span>PUNTOS</span></div>
+    <div><b id="fCombo">0</b><span>COMBO MÁX</span></div>
+    <div><b id="fPerf">0</b><span>PERFECTOS</span></div>
+  </div>
+  <p id="fMsg"></p>
+  <button class="bigbtn" id="againBtn">↻ OTRA VEZ</button>
+</div>
+
+<div id="loader"><div class="spin"></div><p>Cargando la fiesta…</p><p id="err"></p></div>
+
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const D2R = Math.PI / 180;
+const H = 'mixamorigHips', SP='mixamorigSpine', SP1='mixamorigSpine1', SP2='mixamorigSpine2',
+      NE='mixamorigNeck', HE='mixamorigHead',
+      LA='mixamorigLeftArm', LF='mixamorigLeftForeArm',
+      RA='mixamorigRightArm', RF='mixamorigRightForeArm',
+      LUL='mixamorigLeftUpLeg', LL='mixamorigLeftLeg',
+      RUL='mixamorigRightUpLeg', RL='mixamorigRightLeg';
+
+/* ============ movimientos (espacio-mundo, verificados) ============ */
+const MOVES = {
+  idle(t) {
+    const b = Math.sin(t * 2.2);
+    return { pose: { [SP1]:[1.5+b,0,0], [LA]:[0,0,-(5-b*1.2)], [RA]:[0,0,5-b*1.2],
+      [LF]:[0,6,0], [RF]:[0,-6,0], [HE]:[0,Math.sin(t*0.7)*5,0], [SP2]:[1,0,0] },
+      root: [0, 0.01 + b*0.008, 0], rootRy: 0 };
+  },
+  dance1(t) {
+    const b = Math.sin(t * 6.0);
+    return { pose: {
+      [H]:[0,0,b*7], [SP2]:[0,0,-b*9], [SP1]:[3,0,0],
+      [LA]:[0,0,-(75-b*12)], [RA]:[0,0,75-b*12],
+      [LF]:[0,35+b*10,0], [RF]:[0,-(35-b*10),0],
+      [HE]:[0,0,b*6], [LUL]:[0,0,-4], [RUL]:[0,0,4], [LL]:[8,0,0], [RL]:[8,0,0] },
+      root: [b*0.04, Math.abs(b)*0.05, 0], rootRy: 0 };
+  },
+  dance2(t) {
+    const j = Math.abs(Math.sin(t * 4.5)), w = Math.sin(t * 9.0);
+    return { pose: {
+      [LA]:[0,0,-(78+w*14)], [RA]:[0,0,78+w*14], [LF]:[0,20,0], [RF]:[0,-20,0],
+      [LUL]:[-14*j,0,0], [RUL]:[-14*j,0,0], [LL]:[26*j,0,0], [RL]:[26*j,0,0],
+      [SP1]:[-6*j,0,0], [HE]:[0,w*8,0] },
+      root: [0, j*0.16, 0], rootRy: 0 };
+  },
+  dance3(t) {
+    const w = Math.sin(t * 8.0);
+    return { pose: {
+      [LA]:[0,w*20,-78], [RA]:[0,-w*20,78],
+      [LF]:[0,w*25,0], [RF]:[0,-w*25,0],
+      [SP2]:[0,0,w*6], [HE]:[0,0,-w*6], [LUL]:[0,0,-6], [RUL]:[0,0,6] },
+      root: [0, Math.abs(Math.sin(t*8.0))*0.04, 0], rootRy: t*2.2/D2R };
+  },
+  wave(t) {
+    const w = Math.sin(t * 9.0);
+    return { pose: {
+      [LA]:[0,0,-100], [LF]:[0,0,w*30], [RA]:[0,0,8],
+      [HE]:[0,0,8], [SP2]:[0,0,-4], [SP1]:[2,0,0] },
+      root: [0, 0.01, 0], rootRy: 0 };
+  }
+};
+const LANE_MOVE = ['dance1', 'dance2', 'dance3', 'wave'];
+const LANE_EMOJI = ['💃', '🕺', '🎉', '👋'];
+
+/* ============ música (WebAudio, 120 BPM sincronizada al juego) ============ */
+const Music = {
+  ctx: null, master: null, on: true, timer: null, step: 0, next: 0,
+  BPM: 120,
+  ensure() {
+    if (this.ctx || this.failed) return;
+    const C = window.AudioContext || window.webkitAudioContext;
+    if (!C) { this.failed = true; return; }
+    try {
+      this.ctx = new C();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = this.on ? 1 : 0;
+      this.master.connect(this.ctx.destination);
+    } catch (e) { this.failed = true; this.ctx = null; }
+    this.bass = [130.8, 98.0, 110.0, 87.3];
+    this.lead = [523,587,659,784, 880,784,659,587, 523,587,659,587, 440,0,523,0];
+  },
+  start(atTime, stepOffset) {
+    this.ensure();
+    if (!this.ctx || this.timer) return;
+    this.next = atTime;
+    this.step = stepOffset || 0;
+    this.timer = setInterval(() => this.schedule(), 90);
+  },
+  stop() {
+    if (this.timer) { clearInterval(this.timer); this.timer = null; }
+  },
+  schedule() {
+    if (!this.ctx) return;
+    const sixteenth = 60 / this.BPM / 4;   // 0.125s
+    while (this.next < this.ctx.currentTime + 0.35) {
+      const s = this.step % 16, bar = Math.floor(this.step / 16) % 4;
+      this.note(this.bass[bar], this.next, sixteenth * 3.5, 'triangle', 0.16);
+      const f = this.lead[s];
+      if (f) this.note(f, this.next, sixteenth * 1.8, 'square', 0.05);
+      if (s % 4 === 0) this.tick(this.next);            // marca cada beat del juego
+      if (s % 4 === 2) this.note(this.bass[bar] * 2, this.next, sixteenth, 'sine', 0.08);
+      this.next += sixteenth; this.step++;
+    }
+  },
+  note(freq, t, dur, type, vol) {
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + dur + 0.05);
+  },
+  tick(t) {
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = 'square'; o.frequency.value = 1200;
+    g.gain.setValueAtTime(0.06, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + 0.06);
+  },
+  toggle() { this.on = !this.on; if (this.master) this.master.gain.value = this.on ? 1 : 0; return this.on; }
+};
+
+/* ============ escena 3D ============ */
+const container = document.getElementById('scene');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050508);
+
+const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 50);
+camera.position.set(0, 1.0, 4.6);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.0, 0);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.enablePan = false;
+controls.minDistance = 2.2; controls.maxDistance = 9;
+controls.maxPolarAngle = 1.72; controls.minPolarAngle = 0.35;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x30303a, 0.7));
+const key = new THREE.DirectionalLight(0xffffff, 1.4); key.position.set(2.5, 4, 3.5); scene.add(key);
+const spotA = new THREE.SpotLight(0xff4fd8, 60, 20, 0.5, 0.4); spotA.position.set(-4, 5, 2);
+spotA.target.position.set(0, 0, 0); scene.add(spotA, spotA.target);
+const spotB = new THREE.SpotLight(0x4de3ff, 60, 20, 0.5, 0.4); spotB.position.set(4, 5, 2);
+spotB.target.position.set(0, 0, 0); scene.add(spotB, spotB.target);
+
+// pista de baile disco
+const floor = new THREE.Mesh(
+  new THREE.CircleGeometry(2.3, 48),
+  new THREE.MeshStandardMaterial({ color: 0x0a0a12, roughness: 0.35, metalness: 0.7 })
+);
+floor.rotation.x = -Math.PI / 2; floor.position.y = -1.0; scene.add(floor);
+const rings = [];
+for (let i = 0; i < 3; i++) {
+  const r = new THREE.Mesh(
+    new THREE.RingGeometry(0.55 + i * 0.55, 0.68 + i * 0.55, 48),
+    new THREE.MeshBasicMaterial({ color: [0xA572FF, 0x4de3ff, 0xff4fd8][i], transparent: true, opacity: 0.55, side: THREE.DoubleSide })
+  );
+  r.rotation.x = -Math.PI / 2; r.position.y = -0.99; scene.add(r); rings.push(r);
+}
+// estrellitas de fondo
+{
+  const g = new THREE.BufferGeometry(), n = 220, p = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, r = 6 + Math.random() * 10;
+    p[i*3] = Math.cos(a) * r; p[i*3+1] = -1 + Math.random() * 7; p[i*3+2] = Math.sin(a) * r;
+  }
+  g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x8888ff, size: 0.05, transparent: true, opacity: 0.7 })));
+}
+
+/* ---- filtro CRT retro (shader) ---- */
+const CRTShader = {
+  uniforms: { tDiffuse: { value: null }, time: { value: 0 }, resolution: { value: new THREE.Vector2(1, 1) } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform float time; uniform vec2 resolution; varying vec2 vUv;
+    float rnd(vec2 co){ return fract(sin(dot(co, vec2(12.9898,78.233))) * 43758.5453); }
+    void main(){
+      vec2 uv = vUv;
+      // glitch de tracking VHS ocasional
+      float gl = step(0.986, rnd(vec2(floor(time*7.0), 3.7)));
+      uv.x += gl * 0.045 * sin(uv.y*90.0 + time*35.0);
+      // curvatura leve de tubo
+      vec2 cc = uv - 0.5; float r2 = dot(cc, cc);
+      uv = uv + cc * r2 * 0.22;
+      // aberración cromática
+      float sh = 0.0035 + 0.0015*sin(time*2.0);
+      vec3 col;
+      col.r = texture2D(tDiffuse, uv + vec2(sh, 0.0)).r;
+      col.g = texture2D(tDiffuse, uv).g;
+      col.b = texture2D(tDiffuse, uv - vec2(sh, 0.0)).b;
+      // scanlines
+      col *= 0.82 + 0.18 * sin(uv.y * resolution.y * 3.14159);
+      // rejilla vertical sutil
+      col *= 0.94 + 0.06 * sin(uv.x * resolution.x * 3.14159);
+      // viñeta
+      col *= 1.0 - 0.5 * pow(r2 * 2.4, 1.5);
+      // ruido
+      col += (rnd(uv * (1.0 + fract(time)*7.0)) - 0.5) * 0.07;
+      // parpadeo leve
+      col *= 0.97 + 0.03 * sin(time * 120.0);
+      gl_FragColor = vec4(col, 1.0);
+    }`
+};
+let composer = null, crtPass = null, retroOn = true;
+function setupComposer() {
+  try {
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    crtPass = new ShaderPass(CRTShader);
+    composer.addPass(crtPass);
+    composer.addPass(new OutputPass());
+    crtPass.uniforms.resolution.value.set(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio());
+  } catch (e) { composer = null; }
+}
+
+/* ============ personaje ============ */
+const bones = {}, restWorldQ = {}, boneList = [];
+const restP = new THREE.Vector3();
+let hips = null, ready = false;
+
+new GLTFLoader().load('pedro-rigged.glb', (gltf) => {
+  const model = gltf.scene;
+  model.updateMatrixWorld(true);
+  const _pv = new THREE.Vector3(), _sv = new THREE.Vector3();
+  model.traverse(o => {
+    if (o.isBone) {
+      bones[o.name] = o; boneList.push(o.name);
+      const q = new THREE.Quaternion();
+      o.matrixWorld.decompose(_pv, q, _sv);
+      restWorldQ[o.name] = q;
+    }
+  });
+  hips = bones[H];
+  restP.copy(hips.position);
+  scene.add(model);
+  setupComposer();
+  ready = true;
+  document.getElementById('loader').style.opacity = '0';
+  setTimeout(() => document.getElementById('loader').remove(), 700);
+}, undefined, () => {
+  const el = document.getElementById('err');
+  el.style.display = 'block';
+  el.textContent = 'No se pudo cargar el modelo 3D. Revisa tu conexión e intenta de nuevo.';
+});
+
+/* ---- motor de animación (mundo -> local, jerárquico) ---- */
+const _e = new THREE.Euler(), _q = new THREE.Quaternion(), _qy = new THREE.Quaternion(), _qi = new THREE.Quaternion();
+function lerpPose(a, b, k) {
+  const out = { pose: {}, root: [0,0,0], rootRy: 0 };
+  const names = new Set([...Object.keys(a.pose), ...Object.keys(b.pose)]);
+  for (const n of names) {
+    const pa = a.pose[n] || [0,0,0], pb = b.pose[n] || [0,0,0];
+    out.pose[n] = [pa[0]+(pb[0]-pa[0])*k, pa[1]+(pb[1]-pa[1])*k, pa[2]+(pb[2]-pa[2])*k];
+  }
+  for (let i = 0; i < 3; i++) out.root[i] = a.root[i] + (b.root[i]-a.root[i])*k;
+  out.rootRy = a.rootRy + (b.rootRy - a.rootRy) * k;
+  return out;
+}
+function applyPose(p) {
+  const posedW = {};
+  for (const n of boneList) {
+    const an = p.pose[n] || [0,0,0];
+    _e.set(an[0]*D2R, an[1]*D2R, an[2]*D2R, 'XYZ');
+    _q.setFromEuler(_e);
+    _q.multiply(restWorldQ[n]);
+    const par = bones[n].parent;
+    if (par && par.isBone) {
+      const qW = _q.clone();
+      _q.premultiply(_qi.copy(posedW[par.name]).invert());
+      posedW[n] = qW;
+    } else {
+      _qy.setFromEuler(new THREE.Euler(0, p.rootRy*D2R, 0));
+      _q.premultiply(_qy);
+      posedW[n] = _q.clone();
+    }
+    bones[n].quaternion.copy(_q);
+    if (n === H) bones[n].position.set(restP.x + p.root[0], restP.y + p.root[1], restP.z + p.root[2]);
+  }
+}
+
+/* ============ juego de ritmo ============ */
+const BPM = 120, BEAT = 60 / BPM, TRAVEL = 1.7, DUR = 45;
+const PERFECT_MS = 90, GOOD_MS = 200;
+const lanesEl = [...document.querySelectorAll('.lane')];
+const judgeEl = document.getElementById('judge');
+const scoreEl = document.getElementById('score'), comboEl = document.getElementById('combo');
+const timeFill = document.getElementById('timefill');
+const hitlineEl = document.getElementById('hitline');
+
+let chart = [], t0 = 0, playing = false, paused = false;
+let score = 0, combo = 0, maxCombo = 0, nPerfect = 0, nGood = 0, nMiss = 0;
+let fever = false, applied = null, moveName = 'idle', moveUntil = -1;
+let judgeTimer = null;
+
+function buildChart() {
+  chart = [];
+  const totalBeats = Math.floor(DUR / BEAT);
+  let lastLane = -1, streak = 0, seed = 1234567;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  for (let b = 4; b < totalBeats; b++) {
+    const prog = b / totalBeats;
+    const p = 0.45 + prog * 0.45;
+    if (rnd() < p) {
+      let lane = Math.floor(rnd() * 4);
+      if (lane === lastLane) { streak++; if (streak >= 2) lane = (lane + 1 + Math.floor(rnd()*3)) % 4; }
+      else streak = 0;
+      lastLane = lane;
+      chart.push({ beat: b, lane, el: null, judged: false });
+      if (prog > 0.55 && rnd() < 0.3) {  // dobles en la segunda mitad
+        const l2 = (lane + 1 + Math.floor(rnd()*3)) % 4;
+        chart.push({ beat: b + 0.5, lane: l2, el: null, judged: false });
+      }
+    }
+  }
+}
+const beatTime = (b) => t0 + b * BEAT;
+let useAudioClock = false;   // true solo si el AudioContext está corriendo de verdad
+const now = () => (useAudioClock && Music.ctx) ? Music.ctx.currentTime : performance.now() / 1000;
+
+function spawnNote(n) {
+  const el = document.createElement('div');
+  el.className = 'note l' + n.lane;
+  el.textContent = LANE_EMOJI[n.lane];
+  lanesEl[n.lane].appendChild(el);
+  n.el = el;
+}
+function layout() {
+  const hw = document.getElementById('highway').getBoundingClientRect();
+  const hitY = hw.bottom - 46 - hw.top;   // posición de la línea dentro del highway
+  hitlineEl.style.top = (hw.bottom - 46) + 'px';
+  return { top: hw.top, hitY };
+}
+let HW = { top: 0, hitY: 300 };
+
+function startGame() {
+  Music.ensure();
+  // Si el audio está suspendido (sin gesto real / autoplay bloqueado), reanudar
+  // no sirve de nada: el reloj del audio quedaría congelado y las notas no caerían.
+  // Solo se usa el reloj del audio si REALMENTE está corriendo; si no, el juego
+  // corre con performance.now() (sin música esa ronda, pero jugable).
+  useAudioClock = !!(Music.ctx && Music.ctx.state === 'running');
+  const hasAudio = useAudioClock;
+  buildChart();
+  score = 0; combo = 0; maxCombo = 0; nPerfect = 0; nGood = 0; nMiss = 0; fever = false;
+  document.querySelectorAll('.note').forEach(e => e.remove());
+  t0 = now() + 1.2;
+  if (hasAudio) Music.start(t0, 0);
+  playing = true; paused = false;
+  moveName = 'idle'; moveUntil = -1; applied = null;
+  document.getElementById('startOv').classList.add('hidden');
+  document.getElementById('endOv').classList.add('hidden');
+  updateHUD();
+  if (window.confetti) confetti({ particleCount: 80, spread: 80, origin: { y: 0.3 }, colors: ['#A572FF','#4de3ff','#ffd166','#ff7ab8'] });
+}
+function endGame() {
+  playing = false;
+  Music.stop();
+  document.querySelectorAll('.note').forEach(e => e.remove());
+  const best = +(localStorage.getItem('fiesta-retro-best') || 0);
+  const isBest = score > best;
+  if (isBest) localStorage.setItem('fiesta-retro-best', score);
+  document.getElementById('fScore').textContent = score;
+  document.getElementById('fCombo').textContent = maxCombo;
+  document.getElementById('fPerf').textContent = nPerfect;
+  document.getElementById('newbest').style.display = isBest ? 'block' : 'none';
+  document.getElementById('fMsg').textContent =
+    maxCombo >= 25 ? '¡Leyenda de la pista! Ese récord va a durar poco…' :
+    maxCombo >= 12 ? '¡Buen ritmo! Un poco más y entras en fiebre.' :
+    'Sigue practicando, la pista es tuya.';
+  document.getElementById('endOv').classList.remove('hidden');
+  if (window.confetti) {
+    confetti({ particleCount: 120, spread: 100, origin: { y: 0.4 } });
+    setTimeout(() => window.confetti && confetti({ particleCount: 60, angle: 60, spread: 60, origin: { x: 0 } }), 400);
+    setTimeout(() => window.confetti && confetti({ particleCount: 60, angle: 120, spread: 60, origin: { x: 1 } }), 800);
+  }
+}
+function updateHUD() {
+  scoreEl.innerHTML = score + '<small>PUNTOS</small>';
+  comboEl.innerHTML = combo + '<small>COMBO</small>';
+  comboEl.classList.toggle('fever', fever);
+}
+function showJudge(txt, cls) {
+  judgeEl.textContent = txt;
+  judgeEl.className = 'show ' + (cls || '');
+  clearTimeout(judgeTimer);
+  judgeTimer = setTimeout(() => judgeEl.className = '', 450);
+}
+function flashLane(lane, cls) {
+  const l = lanesEl[lane];
+  l.classList.add(cls);
+  setTimeout(() => l.classList.remove(cls), 160);
+}
+function doMove(lane) {
+  moveName = LANE_MOVE[lane];
+  moveUntil = now() + 1.5;
+  const pad = document.querySelector('.pad.p' + lane);
+  pad.classList.add('active');
+  setTimeout(() => pad.classList.remove('active'), 180);
+}
+function tapLane(lane) {
+  if (!playing || paused || !ready) return;
+  const t = now();
+  doMove(lane);
+  let bestN = null, bestDt = 1e9;
+  for (const n of chart) {
+    if (n.judged || n.lane !== lane) continue;
+    const dt = Math.abs(t - beatTime(n.beat));
+    if (dt < bestDt) { bestDt = dt; bestN = n; }
+  }
+  if (bestN && bestDt * 1000 <= GOOD_MS) {
+    bestN.judged = true;
+    if (bestN.el) { bestN.el.classList.add('hit'); setTimeout(() => bestN.el.remove(), 160); }
+    const perfect = bestDt * 1000 <= PERFECT_MS;
+    const base = perfect ? 300 : 100;
+    combo++; maxCombo = Math.max(maxCombo, combo);
+    if (combo >= 15 && !fever) {
+      fever = true;
+      showJudge('🔥 ¡FIEBRE! x2', 'perfect');
+      if (window.confetti) confetti({ particleCount: 70, spread: 120, origin: { y: 0.5 }, colors: ['#ffd166','#ff7ab8','#A572FF'] });
+    } else {
+      showJudge(perfect ? '¡PERFECTO!' : '¡Bien!', perfect ? 'perfect' : '');
+    }
+    score += (base + combo * 5) * (fever ? 2 : 1);
+    if (perfect) nPerfect++; else nGood++;
+    flashLane(lane, perfect ? 'flash-perfect' : 'flash-good');
+  } else {
+    flashLane(lane, 'flash-good');
+  }
+  updateHUD();
+}
+
+lanesEl.forEach(l => {
+  l.addEventListener('pointerdown', (e) => { e.preventDefault(); tapLane(+l.dataset.lane); });
+});
+document.querySelectorAll('.pad').forEach(p => {
+  p.addEventListener('pointerdown', (e) => { e.preventDefault(); tapLane(+p.dataset.lane); });
+});
+const KEYMAP = { d: 0, f: 1, j: 2, k: 3, '1': 0, '2': 1, '3': 2, '4': 3 };
+addEventListener('keydown', (e) => {
+  const l = KEYMAP[e.key.toLowerCase()];
+  if (l !== undefined && !e.repeat) tapLane(l);
+});
+
+// Al pulsar JUGAR: intentar reanudar el audio y ESPERAR a que esté corriendo
+// antes de arrancar, para que música y notas salgan sincronizadas.
+// Si el navegador no lo permite (sin gesto válido), arrancar de todos modos
+// tras 900 ms: el juego usa su propio reloj y las notas caen igual.
+function pressPlay() {
+  Music.ensure();
+  if (Music.ctx && Music.ctx.state === 'suspended') {
+    let done = false;
+    const go = () => { if (!done) { done = true; startGame(); } };
+    try { Music.ctx.resume().then(go, go); } catch (e) { go(); }
+    setTimeout(go, 900);
+  } else {
+    startGame();
+  }
+}
+document.getElementById('playBtn').addEventListener('click', pressPlay);
+document.getElementById('againBtn').addEventListener('click', pressPlay);
+const retroBtn = document.getElementById('retroBtn');
+retroBtn.addEventListener('click', () => {
+  retroOn = !retroOn;
+  document.getElementById('crt').classList.toggle('off', !retroOn);
+  retroBtn.classList.toggle('off', !retroOn);
+});
+const musicBtn = document.getElementById('musicBtn');
+musicBtn.addEventListener('click', () => {
+  Music.ensure();
+  const on = Music.toggle();
+  musicBtn.classList.toggle('off', !on);
+});
+let pauseBegan = 0;
+document.addEventListener('visibilitychange', () => {
+  if (!playing) return;
+  const nowT = now();
+  if (document.hidden) {
+    paused = true;
+    pauseBegan = nowT;
+    Music.stop();
+  } else if (paused) {
+    // reanudar: recorrer el reloj del juego y la música a la retícula de beats
+    t0 += nowT - pauseBegan;
+    if (Music.ctx) {
+      const beatsElapsed = Math.ceil((nowT + 0.25 - t0) / BEAT);
+      Music.start(t0 + beatsElapsed * BEAT, beatsElapsed * 4);
+    }
+    paused = false;
+  }
+});
+
+/* ============ loop ============ */
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+  const tNow = now();
+
+  if (ready) {
+    // animación del muñeco
+    const mv = (tNow < moveUntil) ? moveName : 'idle';
+    const target = MOVES[mv](t);
+    applied = applied ? lerpPose(applied, target, Math.min(1, dt * 8)) : target;
+    applyPose(applied);
+
+    // luces disco al ritmo
+    const beatPhase = playing && !paused ? ((tNow - t0) / BEAT) % 1 : (t % 1);
+    const pulse = Math.max(0, 1 - beatPhase * 2.5);
+    spotA.intensity = 30 + pulse * 70;
+    spotB.intensity = 30 + (1 - pulse) * 70;
+    rings.forEach((r, i) => { r.material.opacity = 0.25 + 0.5 * Math.abs(Math.sin(t * 2 + i * 2.1)); });
+
+    // juego
+    if (playing && !paused) {
+      const el = tNow - t0;
+      timeFill.style.width = Math.max(0, (1 - el / DUR)) * 100 + '%';
+      if (el >= DUR) { endGame(); }
+      else {
+        for (const n of chart) {
+          const bt = beatTime(n.beat);
+          if (!n.judged && !n.el && bt - tNow < TRAVEL) spawnNote(n);
+          if (n.el && !n.judged) {
+            const y = HW.hitY - ((bt - tNow) / TRAVEL) * HW.hitY;
+            n.el.style.transform = `translateY(${Math.max(-80, y - 27)}px)`;
+            if (tNow - bt > GOOD_MS / 1000) {
+              n.judged = true;
+              if (n.el) n.el.remove();
+              nMiss++; combo = 0; fever = false;
+              showJudge('Falló', 'miss');
+              flashLane(n.lane, 'flash-miss');
+              updateHUD();
+            }
+          }
+        }
+      }
+    }
+  }
+  controls.update();
+  if (composer && retroOn) {
+    crtPass.uniforms.time.value = t;
+    composer.render();
+  } else {
+    renderer.render(scene, camera);
+  }
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  if (composer) {
+    composer.setSize(innerWidth, innerHeight);
+    crtPass.uniforms.resolution.value.set(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio());
+  }
+  HW = layout();
+});
+HW = layout();
+setTimeout(() => { HW = layout(); }, 500);
+</script>
+</body>
+</html>
