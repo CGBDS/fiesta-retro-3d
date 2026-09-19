@@ -71,6 +71,9 @@
   #crt { position:fixed; inset:0; z-index:40; pointer-events:none; opacity:1; transition:opacity .3s;
     background:repeating-linear-gradient(to bottom, rgba(0,0,0,.22) 0 1px, transparent 1px 3px); }
   #crt.off { opacity:0; }
+  /* ---- flash rojo del screamer ---- */
+  #scareFlash { position:fixed; inset:0; z-index:45; pointer-events:none; opacity:0;
+    background:radial-gradient(ellipse at center, rgba(255,20,20,.55) 0%, rgba(140,0,0,.85) 65%, rgba(0,0,0,.96) 100%); }
   #judge { position:fixed; left:0; right:0; bottom:170px; z-index:12; text-align:center; pointer-events:none;
     font-size:30px; font-weight:900; color:#fff; text-shadow:0 0 14px #A572FF, 0 2px 4px #000;
     opacity:0; transition:opacity .25s; letter-spacing:1px; }
@@ -140,6 +143,8 @@
   <p>💃 Baile 1 &nbsp; 🕺 Baile 2 &nbsp; 🎉 Baile 3 &nbsp; 👋 Saludar</p>
   <button class="bigbtn" id="playBtn">▶ JUGAR</button>
 </div>
+
+<div id="scareFlash"></div>
 
 <div class="overlay hidden" id="endOv">
   <h1>¡SE ACABÓ! 🎉</h1>
@@ -219,6 +224,16 @@ const MOVES = {
       [LA]:[0,0,-100], [LF]:[0,0,w*30], [RA]:[0,0,8],
       [HE]:[0,0,8], [SP2]:[0,0,-4], [SP1]:[2,0,0] },
       root: [0, 0.01, 0], rootRy: 0 };
+  },
+  scare(t) {   // pose del screamer: brazos arriba, cabeza al frente, tembleque
+    const j = () => (Math.random() - 0.5) * 16;
+    return { pose: {
+      [H]:[10+j(),0,0], [SP1]:[16,0,j()], [SP2]:[14,0,-j()],
+      [LA]:[0,0,-(156+j())], [RA]:[0,0,156+j()],
+      [LF]:[0,44+j(),0], [RF]:[0,-(44+j()),0],
+      [HE]:[30+j(),j(),0],
+      [LUL]:[-10,0,0], [RUL]:[-10,0,0], [LL]:[18,0,0], [RL]:[18,0,0] },
+      root: [0, -0.05, 0], rootRy: 0 };
   }
 };
 const LANE_MOVE = ['dance1', 'dance2', 'dance3', 'wave'];
@@ -339,6 +354,36 @@ const Music = {
       o.connect(g); g.connect(this.grit);
       o.start(t); o.stop(t + 0.5);
     });
+  },
+  scream() {              // ¡SCREAMER! grito distorsionado + ruido rasposo
+    this.ensure();
+    if (!this.ctx) return;
+    const c = this.ctx, out = this.grit || this.master;
+    if (c.state === 'suspended') { try { c.resume(); } catch (e) {} }
+    const t = c.currentTime + 0.02;
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(950, t);
+    o.frequency.exponentialRampToValueAtTime(140, t + 1.0);
+    const vib = c.createOscillator(), vg = c.createGain();
+    vib.frequency.value = 28; vg.gain.value = 130;
+    vib.connect(vg); vg.connect(o.frequency);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.7, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.25);
+    o.connect(g); g.connect(out);
+    const nb = c.createBuffer(1, c.sampleRate, c.sampleRate);
+    const nd = nb.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = (Math.random() * 2 - 1) * (1 - i / nd.length);
+    const ns = c.createBufferSource(); ns.buffer = nb;
+    const bp = c.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.8;
+    const ng = c.createGain();
+    ng.gain.setValueAtTime(0.5, t);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 1.0);
+    ns.connect(bp); bp.connect(ng); ng.connect(out);
+    o.start(t); vib.start(t); ns.start(t);
+    o.stop(t + 1.3); vib.stop(t + 1.3); ns.stop(t + 1.1);
   },
   windStart(t) {          // viento ambiental: ruido filtrado
     const len = 2 * this.ctx.sampleRate;
@@ -475,10 +520,10 @@ function setupComposer() {
 /* ============ personaje ============ */
 const bones = {}, restWorldQ = {}, boneList = [];
 const restP = new THREE.Vector3();
-let hips = null, ready = false;
+let hips = null, ready = false, model = null;
 
 new GLTFLoader().load('pedro-rigged.glb', (gltf) => {
-  const model = gltf.scene;
+  model = gltf.scene;
   model.updateMatrixWorld(true);
   const _pv = new THREE.Vector3(), _sv = new THREE.Vector3();
   model.traverse(o => {
@@ -547,6 +592,7 @@ const timeFill = document.getElementById('timefill');
 const hitlineEl = document.getElementById('hitline');
 
 let chart = [], t0 = 0, playing = false, paused = false;
+let scare = null;   // {t0, dur, cb} mientras el screamer está activo
 let score = 0, combo = 0, maxCombo = 0, nPerfect = 0, nGood = 0, nMiss = 0;
 let fever = false, applied = null, moveName = 'idle', moveUntil = -1;
 let judgeTimer = null;
@@ -599,6 +645,8 @@ function startGame() {
   // corre con performance.now() (sin música esa ronda, pero jugable).
   useAudioClock = !!(Music.ctx && Music.ctx.state === 'running');
   const hasAudio = useAudioClock;
+  scare = null;
+  if (model) { model.position.set(0, 0, 0); model.scale.setScalar(1); }
   buildChart();
   score = 0; combo = 0; maxCombo = 0; nPerfect = 0; nGood = 0; nMiss = 0; fever = false;
   document.querySelectorAll('.note').forEach(e => e.remove());
@@ -610,6 +658,21 @@ function startGame() {
   document.getElementById('endOv').classList.add('hidden');
   updateHUD();
   if (window.confetti) confetti({ particleCount: 80, spread: 80, origin: { y: 0.3 }, colors: ['#A572FF','#4de3ff','#ffd166','#ff7ab8'] });
+}
+function startScare(cb) {
+  // El muñeco se lanza de cantazo hacia la cámara: pose de terror + lunge + shake + grito
+  const f = document.getElementById('scareFlash');
+  f.style.transition = 'none';
+  f.style.opacity = '0.9';
+  requestAnimationFrame(() => { f.style.transition = 'opacity 1.3s'; f.style.opacity = '0'; });
+  Music.scream();
+  scare = { t0: performance.now() / 1000, dur: 1.5, cb };
+  setTimeout(() => {
+    if (model) { model.position.set(0, 0, 0); model.scale.setScalar(1); }
+    const cb2 = scare ? scare.cb : null;
+    scare = null;
+    if (cb2) cb2();
+  }, 1500);
 }
 function endGame() {
   playing = false;
@@ -626,12 +689,14 @@ function endGame() {
     maxCombo >= 25 ? '¡Leyenda de la pista! Ese récord va a durar poco…' :
     maxCombo >= 12 ? '¡Buen ritmo! Un poco más y entras en fiebre.' :
     'Sigue practicando, la pista es tuya.';
-  document.getElementById('endOv').classList.remove('hidden');
-  if (window.confetti) {
-    confetti({ particleCount: 120, spread: 100, origin: { y: 0.4 } });
-    setTimeout(() => window.confetti && confetti({ particleCount: 60, angle: 60, spread: 60, origin: { x: 0 } }), 400);
-    setTimeout(() => window.confetti && confetti({ particleCount: 60, angle: 120, spread: 60, origin: { x: 1 } }), 800);
-  }
+  startScare(() => {   // ¡SCREAMER! y después los resultados
+    document.getElementById('endOv').classList.remove('hidden');
+    if (window.confetti) {
+      confetti({ particleCount: 120, spread: 100, origin: { y: 0.4 } });
+      setTimeout(() => window.confetti && confetti({ particleCount: 60, angle: 60, spread: 60, origin: { x: 0 } }), 400);
+      setTimeout(() => window.confetti && confetti({ particleCount: 60, angle: 120, spread: 60, origin: { x: 1 } }), 800);
+    }
+  });
 }
 function updateHUD() {
   scoreEl.innerHTML = score + '<small>PUNTOS</small>';
@@ -756,10 +821,25 @@ function animate() {
   const tNow = now();
 
   if (ready) {
-    // animación del muñeco
-    const mv = (tNow < moveUntil) ? moveName : 'idle';
-    const target = MOVES[mv](t);
-    applied = applied ? lerpPose(applied, target, Math.min(1, dt * 8)) : target;
+    // animación del muñeco (el screamer toma el control al final)
+    let target;
+    if (scare) {
+      target = MOVES.scare(t);
+      // ¡de cantazo hacia la cámara!
+      const sp = Math.min(1, (performance.now() / 1000 - scare.t0) / scare.dur);
+      const lunge = sp < 0.22 ? (sp / 0.22) : 1;   // llega en ~0.33s
+      const ez = lunge * lunge;
+      if (model) {
+        model.position.z = ez * 3.3;
+        model.position.y = -ez * 0.15;
+        model.scale.setScalar(1 + ez * 0.55);
+      }
+      applied = applied ? lerpPose(applied, target, Math.min(1, dt * 30)) : target;
+    } else {
+      const mv = (tNow < moveUntil) ? moveName : 'idle';
+      target = MOVES[mv](t);
+      applied = applied ? lerpPose(applied, target, Math.min(1, dt * 8)) : target;
+    }
     applyPose(applied);
 
     // luces disco al ritmo
@@ -795,12 +875,23 @@ function animate() {
     }
   }
   controls.update();
+  // sacudida de cámara durante el screamer (se revierte tras renderizar)
+  let shx = 0, shy = 0;
+  if (scare) {
+    const sp = Math.min(1, (performance.now() / 1000 - scare.t0) / scare.dur);
+    const amp = (1 - sp) * 0.11;
+    shx = (Math.random() - 0.5) * amp;
+    shy = (Math.random() - 0.5) * amp;
+    camera.position.x += shx;
+    camera.position.y += shy;
+  }
   if (composer && retroOn) {
     crtPass.uniforms.time.value = t;
     composer.render();
   } else {
     renderer.render(scene, camera);
   }
+  if (scare) { camera.position.x -= shx; camera.position.y -= shy; }
 }
 animate();
 
